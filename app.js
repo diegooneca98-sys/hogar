@@ -120,7 +120,8 @@ async function cargarRecibos() {
 /* ---------- lista genérica (compra / tareas) ---------- */
 async function verLista(tabla, titulo, placeholder) {
   $("#contenido").innerHTML = `<div class="tarjeta"><h2>${titulo}</h2>
-    <form class="add" id="f-add"><input id="nuevo" placeholder="${placeholder}" autocomplete="off"><button>Añadir</button></form></div>
+    <form class="add" id="f-add"><input id="nuevo" placeholder="${placeholder}" autocomplete="off" list="sug-lista"><button>Añadir</button></form>
+    <datalist id="sug-lista"></datalist><div id="sugerencias"></div></div>
     <div class="tarjeta" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
@@ -130,6 +131,29 @@ async function verLista(tabla, titulo, placeholder) {
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
         <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}</span>
         <button class="borrar" data-acc="borrar">×</button></div>`).join("");
+    if (tabla === "compra") pintarSugerencias(pend);
+  };
+  let sugs = null;
+  const pintarSugerencias = async pend => {
+    if (!sugs) {
+      const [{ data: a }, { data: c }] = await Promise.all([
+        sb.rpc("sugerencias_compra"),
+        sb.from("compra").select("texto").order("creado", { ascending: false }).limit(200)]);
+      const vistos = new Set(), lista = [];
+      for (const n of [...(a || []).map(x => x.nombre), ...(c || []).map(x => x.texto)]) {
+        const k = (n || "").toLowerCase(); if (n && !vistos.has(k)) { vistos.add(k); lista.push(n); }
+      }
+      sugs = { top: (a || []).filter(x => x.veces > 0).map(x => x.nombre), todos: lista };
+      $("#sug-lista").innerHTML = lista.map(n => `<option value="${esc(n)}">`).join("");
+    }
+    const ya = new Set(pend.map(x => x.texto.toLowerCase()));
+    const top = sugs.top.filter(n => !ya.has(n.toLowerCase())).slice(0, 12);
+    $("#sugerencias").innerHTML = top.length ? `<p class="sug-tit">Lo que sueles consumir · toca para añadir</p>
+      <div class="chips">${top.map(n => `<button type="button" class="chip">${esc(n)}</button>`).join("")}</div>` : "";
+  };
+  $("#sugerencias").onclick = async e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    b.disabled = true; await sb.from(tabla).insert({ texto: b.textContent }); pintar();
   };
   $("#f-add").onsubmit = async e => {
     e.preventDefault(); const t = $("#nuevo").value.trim(); if (!t) return;

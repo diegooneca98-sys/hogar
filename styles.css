@@ -46,3 +46,9 @@ nav#menu button.activo{color:var(--texto)}
 .resumen b{display:block;font-size:18px}
 .resumen small{color:var(--suave)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* sugerencias de compra */
+.sug-tit { margin: 14px 0 8px; font-size: .85rem; opacity: .7; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--borde, rgba(127,127,127,.35)); background: transparent; color: inherit; border-radius: 999px; padding: 6px 12px; font-size: .9rem; cursor: pointer; }
+.chip:active { transform: scale(.96); }

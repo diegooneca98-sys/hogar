@@ -147,15 +147,31 @@ async function verLista(tabla, titulo, placeholder) {
     <div class="tarjeta" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
-    const pend = (data || []).filter(x => !x.hecho), hechos = (data || []).filter(x => x.hecho).slice(0, 15);
-    $("#lista").innerHTML = (pend.length ? "" : `<p class="vacio">Nada pendiente 🎉</p>`) + [...pend, ...hechos].map(x => `
+    const pend = (data || []).filter(x => !x.hecho);
+    const vistos = new Set(pend.map(x => sinTildes(x.texto)));
+    const hechos = (data || []).filter(x => x.hecho && !vistos.has(sinTildes(x.texto)) && vistos.add(sinTildes(x.texto))).slice(0, 15);
+    const fila = x => `
       <div class="fila ${x.hecho ? "tachado" : ""}" data-id="${x.id}">
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
         <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}</span>
-        <button class="borrar" data-acc="borrar">×</button></div>`).join("");
+        ${tabla === "compra" ? `<label class="cat-btn" title="Cambiar categoría">🏷️<select class="cambiar-cat" data-acc="cat" aria-label="Cambiar categoría">${CATS_COMPRA.map(([id, n]) =>
+          `<option value="${id}" ${id === catDe(x) ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}
+        <button class="borrar" data-acc="borrar">×</button></div>`;
+    let html = pend.length ? "" : `<p class="vacio">Nada pendiente 🎉</p>`;
+    if (tabla === "compra") {
+      for (const [id, nombre] of CATS_COMPRA) {
+        const g = pend.filter(x => catDe(x) === id);
+        if (g.length) html += `<h3 class="cat">${nombre}</h3>` + g.map(fila).join("");
+      }
+    } else html += pend.map(fila).join("");
+    if (hechos.length) html += `<h3 class="cat">Ya cogido</h3>` + hechos.map(fila).join("");
+    $("#lista").innerHTML = html;
     pendientes = pend;
   };
-  let sugs = null, pendientes = [];
+  let sugs = null, pendientes = [], aprendidas = {};
+  const catDe = x => x.categoria || categoriaDe(x.texto, aprendidas);
+  if (tabla === "compra") sb.from("compra_categorias").select("*").then(({ data }) => {
+    (data || []).forEach(r => aprendidas[r.nombre] = r.categoria); pintar(); });
   const sinTildes = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const mayus = t => t.charAt(0).toLocaleUpperCase("es-ES") + t.slice(1);
   const cargarSugs = async () => {
@@ -178,7 +194,14 @@ async function verLista(tabla, titulo, placeholder) {
   const anadir = async t => {
     t = mayus((t || "").trim()); if (!t) return;
     $("#nuevo").value = ""; $("#sugerencias").innerHTML = "";
-    await sb.from(tabla).insert({ texto: t }); sugs = null; pintar(); $("#nuevo").focus();
+    const k = sinTildes(t);
+    if (!pendientes.some(x => sinTildes(x.texto) === k)) {
+      const { data: prev } = await sb.from(tabla).select("id,texto").eq("hecho", true).order("creado", { ascending: false }).limit(500);
+      const viejo = (prev || []).find(x => sinTildes(x.texto) === k);
+      if (viejo) await sb.from(tabla).update({ hecho: false, hecho_en: null, coste: null }).eq("id", viejo.id);
+      else await sb.from(tabla).insert(tabla === "compra" ? { texto: t, categoria: categoriaDe(t, aprendidas) } : { texto: t });
+    }
+    sugs = null; pintar(); $("#nuevo").focus();
   };
   $("#nuevo").oninput = async () => {
     const q = sinTildes($("#nuevo").value.trim());
@@ -196,6 +219,14 @@ async function verLista(tabla, titulo, placeholder) {
   $("#nuevo").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); anadir($("#nuevo").value); } };
   $("#b-add").onclick = () => anadir($("#nuevo").value);
   $("#sugerencias").onclick = e => { const b = e.target.closest(".sug"); if (b) anadir(b.dataset.n); };
+  $("#lista").onchange = async e => {
+    const s = e.target.closest("select.cambiar-cat"); if (!s) return;
+    const f = s.closest(".fila"), texto = f.querySelector(".txt").childNodes[0].textContent.trim();
+    aprendidas[sinTildes(texto)] = s.value;
+    await sb.from("compra").update({ categoria: s.value }).eq("id", f.dataset.id);
+    await sb.from("compra_categorias").upsert({ nombre: sinTildes(texto), categoria: s.value, actualizado: new Date().toISOString() });
+    pintar();
+  };
   $("#lista").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return;
     const id = b.closest(".fila").dataset.id;

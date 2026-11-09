@@ -1,5 +1,5 @@
-const C = "hogar-v8";
-const ARCHIVOS = ["./", "index.html", "styles.css", "app.js", "config.js", "icon.svg", "manifest.webmanifest"];
+const C = "hogar-v9";
+const ARCHIVOS = ["./", "index.html", "styles.css", "categorias.js", "app.js", "config.js", "icon.svg", "manifest.webmanifest"];
 self.addEventListener("install", e => e.waitUntil(caches.open(C).then(c => c.addAll(ARCHIVOS))));
 self.addEventListener("activate", e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))));
 self.addEventListener("fetch", e => {

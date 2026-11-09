@@ -64,3 +64,7 @@ a.fila.ticket { color: inherit; text-decoration: none; }
 .sug-lista:empty { display: none; }
 .sug { text-align: left; background: transparent; color: var(--texto); font-weight: 400; padding: 10px 6px; border-bottom: 1px solid var(--borde); }
 .sug:last-child { border-bottom: 0; }
+textarea#nuevo { width: 100%; padding: 12px; border: 1px solid var(--borde); background: var(--fondo); color: var(--texto); font: inherit; resize: none; height: 48px; line-height: 22px; margin: 0; border-radius: 12px; overflow: hidden; font-size: 17px; }
+.sug { display: flex; align-items: center; gap: 12px; }
+.mini-foto { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; flex: none; background: var(--borde); }
+span.mini-foto { opacity: .35; }

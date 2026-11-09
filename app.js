@@ -62,6 +62,7 @@ async function verInicio() {
       <div class="tarjeta"><div class="reloj" id="reloj"></div><div class="fecha" id="fecha"></div>
         <div class="tiempo" id="tiempo"><span class="vacio">Cargando el tiempo...</span></div></div>
       <div class="tarjeta"><h2>Hoy</h2><div id="hoy"><span class="vacio">Cargando...</span></div></div>
+      <div class="tarjeta"><h2>Esta semana</h2><div id="semana"><span class="vacio">Cargando...</span></div></div>
     </div>
     <div>
       <div class="tarjeta"><h2>Entreno de Diego</h2><div id="entreno"><span class="vacio">Cargando...</span></div></div>
@@ -85,13 +86,30 @@ async function cargarTiempo() {
       <span class="vacio">máx ${Math.round(r.daily.temperature_2m_max[0])}° · mín ${Math.round(r.daily.temperature_2m_min[0])}° · lluvia ${r.daily.precipitation_probability_max[0] ?? 0}%</span>`;
   } catch { $("#tiempo").innerHTML = `<span class="vacio">Sin datos del tiempo</span>`; }
 }
+const COLOR_P = { diego: "var(--diego)", leire: "var(--leire)", comun: "var(--comun)" };
+const NOMBRE_P = { diego: "Diego", leire: "Leire", comun: "Los dos" };
+const horaDe = t => new Date(t).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
+const filaEvento = e => `<div class="fila"><span class="punto" style="background:${COLOR_P[e.persona]}"></span>
+  <span class="txt">${esc(NOMBRE_P[e.persona])}: ${esc(e.titulo)}</span><span class="etq">${horaDe(e.inicio)}</span></div>`;
+async function eventosEntre(desde, hasta) {
+  const { data } = await sb.from("eventos").select("*").gte("inicio", desde.toISOString()).lt("inicio", hasta.toISOString()).order("inicio");
+  return data || [];
+}
 async function cargarHoy() {
+  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
+  const d8 = new Date(d0); d8.setDate(d8.getDate() + 8);
+  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d1, d8)]);
+  $("#semana").innerHTML = evSemana.length ? evSemana.map(e => {
+    const dia = new Date(e.inicio).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", timeZone: "Europe/Madrid" });
+    return filaEvento(e).replace('<span class="etq">', `<span class="etq">${dia} · `);
+  }).join("") : `<span class="vacio">Nada apuntado esta semana.</span>`;
   const { data: turno } = await sb.rpc("turno_del_dia", { dia: hoyISO() });
   const { count: compra } = await sb.from("compra").select("*", { count: "exact", head: true }).eq("hecho", false);
   const { count: tareas } = await sb.from("tareas").select("*", { count: "exact", head: true }).eq("hecho", false);
   $("#hoy").innerHTML = `
     <div class="fila"><span class="punto" style="background:var(--diego)"></span><span class="txt">Diego: turno</span><span class="etq">${esc(TURNOS[turno] || "—")}</span></div>
-    <div class="fila"><span class="punto" style="background:var(--comun)"></span><span class="txt">Calendario de iCloud</span><span class="etq">próximamente</span></div>
+    ${evHoy.map(filaEvento).join("")}
     <div class="fila"><span class="txt">🛒 Por comprar</span><span class="etq">${compra ?? 0}</span></div>
     <div class="fila"><span class="txt">✅ Tareas pendientes</span><span class="etq">${tareas ?? 0}</span></div>`;
 }

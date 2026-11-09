@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hogar</title>
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hogar">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <section id="login" class="vista oculto">
+    <div class="tarjeta login">
+      <h1>Hogar</h1>
+      <p class="sub">Diego y Leire</p>
+      <form id="form-login">
+        <input id="email" type="email" placeholder="Correo" autocomplete="email" required>
+        <input id="pass" type="password" placeholder="Contraseña" autocomplete="current-password" required minlength="6">
+        <button type="submit">Entrar</button>
+        <button type="button" id="btn-registro" class="secundario">Crear mi cuenta</button>
+        <p id="login-msg" class="msg"></p>
+      </form>
+    </div>
+  </section>
+
+  <section id="principal" class="vista oculto">
+    <main id="contenido"></main>
+    <nav id="menu">
+      <button data-v="inicio" class="activo"><span>🏠</span>Inicio</button>
+      <button data-v="compra"><span>🛒</span>Compra</button>
+      <button data-v="tareas"><span>✅</span>Tareas</button>
+      <button data-v="gastos"><span>💶</span>Gastos</button>
+      <button data-v="mas"><span>⋯</span>Más</button>
+    </nav>
+  </section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

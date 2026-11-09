@@ -58,3 +58,9 @@ nav#menu button.activo{color:var(--texto)}
 .ticket-bar .sug-tit { margin: 0; }
 .mini { font-size: .85rem; color: var(--suave); border: 1px solid var(--borde); border-radius: 999px; padding: 5px 11px; cursor: pointer; }
 a.fila.ticket { color: inherit; text-decoration: none; }
+
+/* autocompletar de la lista */
+.sug-lista { display: flex; flex-direction: column; margin-top: 6px; }
+.sug-lista:empty { display: none; }
+.sug { text-align: left; background: transparent; color: var(--texto); font-weight: 400; padding: 10px 6px; border-bottom: 1px solid var(--borde); }
+.sug:last-child { border-bottom: 0; }

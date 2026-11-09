@@ -121,7 +121,9 @@ async function cargarRecibos() {
 async function verLista(tabla, titulo, placeholder) {
   $("#contenido").innerHTML = `<div class="tarjeta"><h2>${titulo}</h2>
     <form class="add" id="f-add"><input id="nuevo" placeholder="${placeholder}" autocomplete="off" list="sug-lista"><button>Añadir</button></form>
-    <datalist id="sug-lista"></datalist><div id="sugerencias"></div></div>
+    <datalist id="sug-lista"></datalist><div id="sugerencias"></div>
+    ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
+      <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
     <div class="tarjeta" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
@@ -165,21 +167,41 @@ async function verLista(tabla, titulo, placeholder) {
     if (b.dataset.acc === "borrar") await sb.from(tabla).delete().eq("id", id);
     else {
       const hecho = !b.classList.contains("hecho"); const cambio = { hecho, hecho_en: hecho ? new Date().toISOString() : null };
-      if (tabla === "compra" && hecho) {
-        const c = prompt("¿Cuánto ha costado? (opcional, se apunta en gastos comunes > Compra)");
-        const n = parseFloat(String(c || "").replace(",", "."));
-        if (n > 0) {
-          cambio.coste = n;
-          const texto = b.closest(".fila").querySelector(".txt").textContent.trim();
-          await sb.from("gastos").insert({ cuenta: "comun", categoria: "Compra", concepto: texto, importe: n });
-        }
-      }
       await sb.from(tabla).update(cambio).eq("id", id);
     }
     pintar();
   };
+  if (tabla === "compra") { pintarTickets(); $("#f-ticket").onchange = subirTicket; }
   const ch = sb.channel("rt-" + tabla).on("postgres_changes", { event: "*", schema: "public", table: tabla }, pintar).subscribe();
   canales.push(ch); pintar();
+}
+async function subirTicket(e) {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  const msg = $("#ticket-msg");
+  const t = prompt("Total del ticket en € (opcional, se apunta en gastos comunes > Compra)");
+  const total = parseFloat(String(t || "").replace(",", ".")) || null;
+  const tienda = total ? (prompt("¿Tienda? (opcional)", "") || "").trim() || null : null;
+  msg.textContent = "Subiendo…";
+  const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
+  const ruta = `${hoyISO().slice(0, 7)}/${Date.now()}.${ext}`;
+  const up = await sb.storage.from("tickets").upload(ruta, f, { contentType: f.type || "image/jpeg" });
+  if (up.error) { msg.textContent = "No se pudo subir: " + up.error.message; return; }
+  let gasto_id = null;
+  if (total) {
+    const { data } = await sb.from("gastos").insert({ cuenta: "comun", categoria: "Compra", concepto: "Ticket" + (tienda ? " " + tienda : ""), importe: total }).select("id").single();
+    gasto_id = data?.id || null;
+  }
+  await sb.from("tickets").insert({ ruta, total, tienda, gasto_id });
+  msg.textContent = "Ticket guardado ✓"; pintarTickets();
+}
+async function pintarTickets() {
+  const { data } = await sb.from("tickets").select("*").order("creado", { ascending: false }).limit(5);
+  if (!data?.length) { $("#tickets").innerHTML = ""; return; }
+  const { data: urls } = await sb.storage.from("tickets").createSignedUrls(data.map(x => x.ruta), 3600);
+  $("#tickets").innerHTML = `<p class="sug-tit">Últimos tickets</p>` + data.map((x, i) => `
+    <a class="fila ticket" href="${urls?.[i]?.signedUrl || "#"}" target="_blank" rel="noopener">
+      <span class="txt">${new Date(x.creado).toLocaleDateString("es-ES", { day: "numeric", month: "short" })}${x.tienda ? " · " + esc(x.tienda) : ""}</span>
+      ${x.total ? `<span class="etq">${eur(x.total)}</span>` : ""}</a>`).join("");
 }
 const verCompra = () => verLista("compra", "Lista de la compra", "Leche, pan, huevos...");
 const verTareas = () => verLista("tareas", "Tareas de casa", "Limpiar baño, poner lavadora...");

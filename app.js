@@ -138,8 +138,10 @@ async function cargarRecibos() {
 /* ---------- lista genérica (compra / tareas) ---------- */
 async function verLista(tabla, titulo, placeholder) {
   $("#contenido").innerHTML = `<div class="tarjeta"><h2>${titulo}</h2>
-    <form class="add" id="f-add"><input id="nuevo" placeholder="${placeholder}" autocomplete="off" list="sug-lista"><button>Añadir</button></form>
-    <datalist id="sug-lista"></datalist><div id="sugerencias"></div>
+    <div class="add" id="f-add"><input id="nuevo" name="articulo" type="text" placeholder="${placeholder}"
+      autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" enterkeyhint="done"
+      data-1p-ignore data-lpignore="true" data-form-type="other"><button type="button" id="b-add">Añadir</button></div>
+    <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
     <div class="tarjeta" id="lista"></div>`;
@@ -151,34 +153,43 @@ async function verLista(tabla, titulo, placeholder) {
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
         <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}</span>
         <button class="borrar" data-acc="borrar">×</button></div>`).join("");
-    if (tabla === "compra") pintarSugerencias(pend);
+    pendientes = pend;
   };
-  let sugs = null;
-  const pintarSugerencias = async pend => {
-    if (!sugs) {
-      const [{ data: a }, { data: c }] = await Promise.all([
-        sb.rpc("sugerencias_compra"),
-        sb.from("compra").select("texto").order("creado", { ascending: false }).limit(200)]);
-      const vistos = new Set(), lista = [];
-      for (const n of [...(a || []).map(x => x.nombre), ...(c || []).map(x => x.texto)]) {
-        const k = (n || "").toLowerCase(); if (n && !vistos.has(k)) { vistos.add(k); lista.push(n); }
-      }
-      sugs = { top: (a || []).filter(x => x.veces > 0).map(x => x.nombre), todos: lista };
-      $("#sug-lista").innerHTML = lista.map(n => `<option value="${esc(n)}">`).join("");
-    }
-    const ya = new Set(pend.map(x => x.texto.toLowerCase()));
-    const top = sugs.top.filter(n => !ya.has(n.toLowerCase())).slice(0, 12);
-    $("#sugerencias").innerHTML = top.length ? `<p class="sug-tit">Lo que sueles consumir · toca para añadir</p>
-      <div class="chips">${top.map(n => `<button type="button" class="chip">${esc(n)}</button>`).join("")}</div>` : "";
+  let sugs = null, pendientes = [];
+  const sinTildes = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const mayus = t => t.charAt(0).toLocaleUpperCase("es-ES") + t.slice(1);
+  const cargarSugs = async () => {
+    if (sugs) return sugs;
+    const peticiones = [sb.from(tabla).select("texto").order("creado", { ascending: false }).limit(300)];
+    if (tabla === "compra") peticiones.push(sb.rpc("sugerencias_compra"));
+    const [{ data: c }, r2] = await Promise.all(peticiones);
+    const peso = new Map();
+    const sumar = (n, v) => { if (!n) return; const k = sinTildes(n.trim()); const x = peso.get(k);
+      peso.set(k, { nombre: x ? x.nombre : mayus(n.trim()), v: (x ? x.v : 0) + v }); };
+    (c || []).forEach(x => sumar(x.texto, 3));
+    (r2?.data || []).forEach(x => sumar(x.nombre, 1 + x.veces));
+    sugs = [...peso.values()].sort((a, b) => b.v - a.v);
+    return sugs;
   };
-  $("#sugerencias").onclick = async e => {
-    const b = e.target.closest(".chip"); if (!b) return;
-    b.disabled = true; await sb.from(tabla).insert({ texto: b.textContent }); pintar();
+  const anadir = async t => {
+    t = mayus((t || "").trim()); if (!t) return;
+    $("#nuevo").value = ""; $("#sugerencias").innerHTML = "";
+    await sb.from(tabla).insert({ texto: t }); sugs = null; pintar(); $("#nuevo").focus();
   };
-  $("#f-add").onsubmit = async e => {
-    e.preventDefault(); const t = $("#nuevo").value.trim(); if (!t) return;
-    $("#nuevo").value = ""; await sb.from(tabla).insert({ texto: t }); pintar();
+  $("#nuevo").oninput = async () => {
+    const q = sinTildes($("#nuevo").value.trim());
+    if (!q) { $("#sugerencias").innerHTML = ""; return; }
+    const ya = new Set(pendientes.map(x => sinTildes(x.texto)));
+    const lista = (await cargarSugs()).filter(x => !ya.has(sinTildes(x.nombre)));
+    const k = x => sinTildes(x.nombre);
+    const empieza = lista.filter(x => k(x).startsWith(q) || k(x).split(" ").some(w => w.startsWith(q)));
+    const contiene = q.length < 2 ? [] : lista.filter(x => !empieza.includes(x) && k(x).includes(q));
+    const res = [...empieza, ...contiene].slice(0, 6);
+    $("#sugerencias").innerHTML = res.map(x => `<button type="button" class="sug">${esc(x.nombre)}</button>`).join("");
   };
+  $("#nuevo").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); anadir($("#nuevo").value); } };
+  $("#b-add").onclick = () => anadir($("#nuevo").value);
+  $("#sugerencias").onclick = e => { const b = e.target.closest(".sug"); if (b) anadir(b.textContent); };
   $("#lista").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return;
     const id = b.closest(".fila").dataset.id;

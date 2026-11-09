@@ -138,9 +138,9 @@ async function cargarRecibos() {
 /* ---------- lista genérica (compra / tareas) ---------- */
 async function verLista(tabla, titulo, placeholder) {
   $("#contenido").innerHTML = `<div class="tarjeta"><h2>${titulo}</h2>
-    <div class="add" id="f-add"><input id="nuevo" name="articulo" type="text" placeholder="${placeholder}"
+    <div class="add" id="f-add"><textarea id="nuevo" rows="1" placeholder="${placeholder}"
       autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" enterkeyhint="done"
-      data-1p-ignore data-lpignore="true" data-form-type="other"><button type="button" id="b-add">Añadir</button></div>
+      data-1p-ignore data-lpignore="true" data-form-type="other"></textarea><button type="button" id="b-add">Añadir</button></div>
     <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
@@ -168,6 +168,10 @@ async function verLista(tabla, titulo, placeholder) {
       peso.set(k, { nombre: x ? x.nombre : mayus(n.trim()), v: (x ? x.v : 0) + v }); };
     (c || []).forEach(x => sumar(x.texto, 3));
     (r2?.data || []).forEach(x => sumar(x.nombre, 1 + x.veces));
+    if (tabla === "compra") {
+      const { data: f } = await sb.rpc("fotos_alimentos");
+      (f || []).forEach(x => { const e = peso.get(sinTildes(x.nombre.trim())); if (e) e.foto = x.foto; });
+    }
     sugs = [...peso.values()].sort((a, b) => b.v - a.v);
     return sugs;
   };
@@ -185,11 +189,13 @@ async function verLista(tabla, titulo, placeholder) {
     const empieza = lista.filter(x => k(x).startsWith(q) || k(x).split(" ").some(w => w.startsWith(q)));
     const contiene = q.length < 2 ? [] : lista.filter(x => !empieza.includes(x) && k(x).includes(q));
     const res = [...empieza, ...contiene].slice(0, 6);
-    $("#sugerencias").innerHTML = res.map(x => `<button type="button" class="sug">${esc(x.nombre)}</button>`).join("");
+    $("#sugerencias").innerHTML = res.map(x => `<button type="button" class="sug" data-n="${esc(x.nombre)}">
+      ${x.foto ? `<img class="mini-foto" data-foto="${esc(x.foto)}" alt="">` : `<span class="mini-foto"></span>`}<span>${esc(x.nombre)}</span></button>`).join("");
+    document.querySelectorAll("#sugerencias img[data-foto]").forEach(async img => { const u = await miniatura(img.dataset.foto); if (u) img.src = u; });
   };
   $("#nuevo").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); anadir($("#nuevo").value); } };
   $("#b-add").onclick = () => anadir($("#nuevo").value);
-  $("#sugerencias").onclick = e => { const b = e.target.closest(".sug"); if (b) anadir(b.textContent); };
+  $("#sugerencias").onclick = e => { const b = e.target.closest(".sug"); if (b) anadir(b.dataset.n); };
   $("#lista").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return;
     const id = b.closest(".fila").dataset.id;
@@ -203,6 +209,25 @@ async function verLista(tabla, titulo, placeholder) {
   if (tabla === "compra") { pintarTickets(); $("#f-ticket").onchange = subirTicket; }
   const ch = sb.channel("rt-" + tabla).on("postgres_changes", { event: "*", schema: "public", table: tabla }, pintar).subscribe();
   canales.push(ch); pintar();
+}
+/* miniaturas de las fotos de alimentos: se piden una vez y se guardan pequeñas en el móvil */
+const minis = {};
+async function miniatura(id) {
+  if (minis[id]) return minis[id];
+  try { const g = localStorage.getItem("mini:" + id); if (g) return (minis[id] = g); } catch {}
+  minis[id] = (async () => {
+    const { data } = await sb.rpc("foto_alimento", { id });
+    const f = data?.[0]; if (!f?.base64) return null;
+    const img = new Image(); img.src = `data:${f.tipo || "image/jpeg"};base64,${f.base64}`;
+    await img.decode();
+    const c = document.createElement("canvas"), t = 96, k = Math.max(t / img.width, t / img.height);
+    c.width = c.height = t;
+    c.getContext("2d").drawImage(img, (t - img.width * k) / 2, (t - img.height * k) / 2, img.width * k, img.height * k);
+    const u = c.toDataURL("image/jpeg", 0.7);
+    try { localStorage.setItem("mini:" + id, u); } catch {}
+    return (minis[id] = u);
+  })().catch(() => null);
+  return minis[id];
 }
 async function subirTicket(e) {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;

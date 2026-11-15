@@ -62,10 +62,10 @@ async function verInicio() {
       <div class="tarjeta"><div class="reloj" id="reloj"></div><div class="fecha" id="fecha"></div>
         <div class="tiempo" id="tiempo"><span class="vacio">Cargando el tiempo...</span></div></div>
       <div class="tarjeta"><h2>Hoy</h2><div id="hoy"><span class="vacio">Cargando...</span></div></div>
-      <div class="tarjeta"><h2>Esta semana</h2><div id="semana"><span class="vacio">Cargando...</span></div></div>
+      <div class="tarjeta"><h2>Próximos 7 días</h2><div id="semana"><span class="vacio">Cargando...</span></div></div>
     </div>
     <div>
-      <div class="tarjeta"><h2>Entreno de Diego</h2><div id="entreno"><span class="vacio">Cargando...</span></div></div>
+      <div class="tarjeta"><h2>Entrenos de Diego · 7 días</h2><div id="entreno"><span class="vacio">Cargando...</span></div></div>
       <div class="tarjeta"><h2>Próximos recibos</h2><div id="recibos"></div></div>
     </div>
   </div>`;
@@ -98,12 +98,12 @@ async function eventosEntre(desde, hasta) {
 async function cargarHoy() {
   const d0 = new Date(); d0.setHours(0, 0, 0, 0);
   const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
-  const d8 = new Date(d0); d8.setDate(d8.getDate() + 8);
-  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d1, d8)]);
+  const d7 = new Date(d0); d7.setDate(d7.getDate() + 7);
+  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d0, d7)]);
   $("#semana").innerHTML = evSemana.length ? evSemana.map(e => {
     const dia = new Date(e.inicio).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", timeZone: "Europe/Madrid" });
     return filaEvento(e).replace('<span class="etq">', `<span class="etq">${dia} · `);
-  }).join("") : `<span class="vacio">Nada apuntado esta semana.</span>`;
+  }).join("") : `<span class="vacio">Nada apuntado en los próximos 7 días.</span>`;
   const { data: turno } = await sb.rpc("turno_del_dia", { dia: hoyISO() });
   const { count: compra } = await sb.from("compra").select("*", { count: "exact", head: true }).eq("hecho", false);
   const hoy = hoyISO();
@@ -116,12 +116,16 @@ async function cargarHoy() {
     <div class="fila"><span class="txt">🛒 Por comprar</span><span class="etq">${compra ?? 0}</span></div>
     <div class="fila"><span class="txt">✅ Tareas pendientes</span><span class="etq">${tareas ?? 0}</span></div>`;
 }
+const isoMas = n => { const d = new Date(); d.setDate(d.getDate() + n); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 async function cargarEntreno() {
-  const { data, error } = await sb.rpc("entreno_del_dia", { dia: hoyISO() });
-  if (error || !data) { $("#entreno").innerHTML = `<span class="vacio">Hoy no hay entreno programado.</span>`; return; }
-  $("#entreno").innerHTML = `<div class="fila" style="cursor:pointer" id="ent-t"><span class="txt"><b>${esc(data.titulo)}</b></span><span class="etq">ver</span></div>
-    <div class="entreno-detalle" id="ent-d">${esc(data.detalle)}</div>`;
-  $("#ent-t").onclick = () => $("#ent-d").classList.toggle("abierto");
+  const dias = [0, 1, 2, 3, 4, 5, 6].map(isoMas);
+  const res = await Promise.all(dias.map(dia => sb.rpc("entreno_del_dia", { dia })));
+  const filas = dias.map((dia, i) => ({ dia, i, e: res[i].error ? null : res[i].data })).filter(x => x.e);
+  if (!filas.length) { $("#entreno").innerHTML = `<span class="vacio">No hay entrenos programados en los próximos 7 días.</span>`; return; }
+  const nombreDia = (dia, i) => i === 0 ? "hoy" : i === 1 ? "mañana" : new Date(dia + "T12:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric" });
+  $("#entreno").innerHTML = filas.map(({ dia, i, e }) => `<div class="fila" style="cursor:pointer" data-ent="${i}"><span class="txt">${i === 0 ? `<b>${esc(e.titulo)}</b>` : esc(e.titulo)}</span><span class="etq">${nombreDia(dia, i)}</span></div>
+    <div class="entreno-detalle" id="ent-d${i}">${esc(e.detalle)}</div>`).join("");
+  $("#entreno").querySelectorAll("[data-ent]").forEach(f => f.onclick = () => $("#ent-d" + f.dataset.ent).classList.toggle("abierto"));
 }
 function proximosRecibos(recibos, dias = 10) {
   const hoy = new Date(); hoy.setHours(0, 0, 0, 0); const res = [];

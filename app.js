@@ -98,8 +98,8 @@ async function eventosEntre(desde, hasta) {
 async function cargarHoy() {
   const d0 = new Date(); d0.setHours(0, 0, 0, 0);
   const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
-  const d7 = new Date(d0); d7.setDate(d7.getDate() + 7);
-  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d0, d7)]);
+  const d8 = new Date(d0); d8.setDate(d8.getDate() + 8);
+  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d1, d8)]);
   $("#semana").innerHTML = evSemana.length ? evSemana.map(e => {
     const dia = new Date(e.inicio).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", timeZone: "Europe/Madrid" });
     return filaEvento(e).replace('<span class="etq">', `<span class="etq">${dia} · `);

@@ -106,10 +106,13 @@ async function cargarHoy() {
   }).join("") : `<span class="vacio">Nada apuntado esta semana.</span>`;
   const { data: turno } = await sb.rpc("turno_del_dia", { dia: hoyISO() });
   const { count: compra } = await sb.from("compra").select("*", { count: "exact", head: true }).eq("hecho", false);
-  const { count: tareas } = await sb.from("tareas").select("*", { count: "exact", head: true }).eq("hecho", false);
+  const hoy = hoyISO();
+  const { count: tareas } = await sb.from("tareas").select("*", { count: "exact", head: true }).eq("hecho", false).or(`fecha.is.null,fecha.lte.${hoy}`);
+  const { data: tHoy } = await sb.from("tareas").select("texto,fecha").eq("hecho", false).lte("fecha", hoy).order("fecha");
   $("#hoy").innerHTML = `
     <div class="fila"><span class="punto" style="background:var(--diego)"></span><span class="txt">Diego: turno</span><span class="etq">${esc(TURNOS[turno] || "—")}</span></div>
     ${evHoy.map(filaEvento).join("")}
+    ${(tHoy || []).map(t => `<div class="fila"><span class="txt">📌 ${esc(t.texto)}</span><span class="etq">${t.fecha === hoy ? "hoy" : "atrasada"}</span></div>`).join("")}
     <div class="fila"><span class="txt">🛒 Por comprar</span><span class="etq">${compra ?? 0}</span></div>
     <div class="fila"><span class="txt">✅ Tareas pendientes</span><span class="etq">${tareas ?? 0}</span></div>`;
 }
@@ -141,19 +144,25 @@ async function verLista(tabla, titulo, placeholder) {
     <div class="add" id="f-add"><textarea id="nuevo" rows="1" placeholder="${placeholder}"
       autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" enterkeyhint="done"
       data-1p-ignore data-lpignore="true" data-form-type="other"></textarea><button type="button" id="b-add">Añadir</button></div>
+    ${tabla === "tareas" ? `<div class="fecha-bar"><label class="mini">📅 Para el día <input type="date" id="f-fecha" min="${hoyISO()}"></label>
+      <span class="sug-tit">opcional: no saldrá en la lista hasta ese día</span></div>` : ""}
     <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
     <div class="tarjeta" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
-    const pend = (data || []).filter(x => !x.hecho);
+    const hoy = hoyISO();
+    const pendTodas = (data || []).filter(x => !x.hecho);
+    const prog = pendTodas.filter(x => x.fecha && x.fecha > hoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const pend = pendTodas.filter(x => !prog.includes(x));
     const vistos = new Set(pend.map(x => sinTildes(x.texto)));
     const hechos = (data || []).filter(x => x.hecho && !vistos.has(sinTildes(x.texto)) && vistos.add(sinTildes(x.texto))).slice(0, 15);
     const fila = x => `
       <div class="fila ${x.hecho ? "tachado" : ""}" data-id="${x.id}">
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
-        <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}</span>
+        <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}${x.fecha && !x.hecho ? ` <span class="etq">${fechaCorta(x.fecha)}</span>` : ""}</span>
+        ${tabla === "tareas" && !x.hecho ? `<label class="cat-btn" title="Cambiar fecha">📅<input type="date" class="cambiar-fecha" value="${x.fecha || ""}" aria-label="Cambiar fecha"></label>` : ""}
         ${tabla === "compra" ? `<label class="cat-btn" title="Cambiar categoría">🏷️<select class="cambiar-cat" data-acc="cat" aria-label="Cambiar categoría">${CATS_COMPRA.map(([id, n]) =>
           `<option value="${id}" ${id === catDe(x) ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}
         <button class="borrar" data-acc="borrar">×</button></div>`;
@@ -164,9 +173,10 @@ async function verLista(tabla, titulo, placeholder) {
         if (g.length) html += `<h3 class="cat">${nombre}</h3>` + g.map(fila).join("");
       }
     } else html += pend.map(fila).join("");
-    if (hechos.length) html += `<h3 class="cat">Ya cogido</h3>` + hechos.map(fila).join("");
+    if (prog.length) html += `<h3 class="cat">Programadas</h3>` + prog.map(fila).join("");
+    if (hechos.length) html += `<h3 class="cat">${tabla === "compra" ? "Ya cogido" : "Hechas"}</h3>` + hechos.map(fila).join("");
     $("#lista").innerHTML = html;
-    pendientes = pend;
+    pendientes = pendTodas;
   };
   let sugs = null, pendientes = [], aprendidas = {};
   const catDe = x => x.categoria || categoriaDe(x.texto, aprendidas);
@@ -198,9 +208,11 @@ async function verLista(tabla, titulo, placeholder) {
     if (!pendientes.some(x => sinTildes(x.texto) === k)) {
       const { data: prev } = await sb.from(tabla).select("id,texto").eq("hecho", true).order("creado", { ascending: false }).limit(500);
       const viejo = (prev || []).find(x => sinTildes(x.texto) === k);
-      if (viejo) await sb.from(tabla).update({ hecho: false, hecho_en: null, coste: null }).eq("id", viejo.id);
-      else await sb.from(tabla).insert(tabla === "compra" ? { texto: t, categoria: categoriaDe(t, aprendidas) } : { texto: t });
+      const fecha = tabla === "tareas" ? ($("#f-fecha").value || null) : undefined;
+      if (viejo) await sb.from(tabla).update({ hecho: false, hecho_en: null, coste: null, ...(tabla === "tareas" ? { fecha } : {}) }).eq("id", viejo.id);
+      else await sb.from(tabla).insert(tabla === "compra" ? { texto: t, categoria: categoriaDe(t, aprendidas) } : { texto: t, fecha });
     }
+    if (tabla === "tareas") $("#f-fecha").value = "";
     sugs = null; pintar(); $("#nuevo").focus();
   };
   $("#nuevo").oninput = async () => {
@@ -220,6 +232,8 @@ async function verLista(tabla, titulo, placeholder) {
   $("#b-add").onclick = () => anadir($("#nuevo").value);
   $("#sugerencias").onclick = e => { const b = e.target.closest(".sug"); if (b) anadir(b.dataset.n); };
   $("#lista").onchange = async e => {
+    const fi = e.target.closest("input.cambiar-fecha");
+    if (fi) { await sb.from("tareas").update({ fecha: fi.value || null }).eq("id", fi.closest(".fila").dataset.id); pintar(); return; }
     const s = e.target.closest("select.cambiar-cat"); if (!s) return;
     const f = s.closest(".fila"), texto = f.querySelector(".txt").childNodes[0].textContent.trim();
     aprendidas[sinTildes(texto)] = s.value;
@@ -288,6 +302,12 @@ async function pintarTickets() {
       <span class="txt">${new Date(x.creado).toLocaleDateString("es-ES", { day: "numeric", month: "short" })}${x.tienda ? " · " + esc(x.tienda) : ""}</span>
       ${x.total ? `<span class="etq">${eur(x.total)}</span>` : ""}</a>`).join("");
 }
+const fechaCorta = f => {
+  const d = new Date(f + "T12:00:00"), hoy = hoyISO();
+  if (f === hoy) return "hoy";
+  if (f < hoy) return "atrasada · " + d.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("es-ES", { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+};
 const verCompra = () => verLista("compra", "Lista de la compra", "Leche, pan, huevos...");
 const verTareas = () => verLista("tareas", "Tareas de casa", "Limpiar baño, poner lavadora...");
 

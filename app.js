@@ -153,7 +153,7 @@ async function verLista(tabla, titulo, placeholder) {
     <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
-    <div class="tarjeta" id="lista"></div>`;
+    <div class="tarjeta ${tabla === "compra" ? "compacta" : ""}" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
     const hoy = hoyISO();
@@ -165,7 +165,6 @@ async function verLista(tabla, titulo, placeholder) {
     const fila = x => `
       <div class="fila ${x.hecho ? "tachado" : ""}" data-id="${x.id}">
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
-        ${tabla === "compra" && fotos[sinTildes(x.texto.trim())] ? `<img class="mini-foto en-lista" data-foto="${esc(fotos[sinTildes(x.texto.trim())])}" alt="">` : ""}
         <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}${x.fecha && !x.hecho ? ` <span class="etq">${fechaCorta(x.fecha)}</span>` : ""}</span>
         ${tabla === "tareas" && !x.hecho ? `<label class="cat-btn" title="Cambiar fecha">📅<input type="date" class="cambiar-fecha" value="${x.fecha || ""}" aria-label="Cambiar fecha"></label>` : ""}
         ${tabla === "compra" ? `<label class="cat-btn" title="Cambiar categoría">🏷️<select class="cambiar-cat" data-acc="cat" aria-label="Cambiar categoría">${CATS_COMPRA.map(([id, n]) =>
@@ -181,16 +180,12 @@ async function verLista(tabla, titulo, placeholder) {
     if (prog.length) html += `<h3 class="cat">Programadas</h3>` + prog.map(fila).join("");
     if (hechos.length) html += `<h3 class="cat">${tabla === "compra" ? "Ya cogido" : "Hechas"}</h3>` + hechos.map(fila).join("");
     $("#lista").innerHTML = html;
-    document.querySelectorAll("#lista img[data-foto]").forEach(async img => { const u = await miniatura(img.dataset.foto); if (u) img.src = u; });
     pendientes = pendTodas;
   };
-  let sugs = null, pendientes = [], aprendidas = {}, fotos = {};
+  let sugs = null, pendientes = [], aprendidas = {};
   const catDe = x => x.categoria || categoriaDe(x.texto, aprendidas);
   if (tabla === "compra") sb.from("compra_categorias").select("*").then(({ data }) => {
     (data || []).forEach(r => aprendidas[r.nombre] = r.categoria); pintar(); });
-  /* fotos de los alimentos (app de rendimiento): miniatura junto al nombre en la lista */
-  if (tabla === "compra") sb.rpc("fotos_alimentos").then(({ data }) => {
-    (data || []).forEach(x => { if (x.foto) fotos[sinTildes(x.nombre.trim())] = x.foto; }); pintar(); });
   const sinTildes = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const mayus = t => t.charAt(0).toLocaleUpperCase("es-ES") + t.slice(1);
   const cargarSugs = async () => {
@@ -205,7 +200,6 @@ async function verLista(tabla, titulo, placeholder) {
     (r2?.data || []).forEach(x => sumar(x.nombre, 1 + x.veces));
     if (tabla === "compra") {
       const { data: f } = await sb.rpc("fotos_alimentos");
-      (f || []).forEach(x => { if (x.foto) fotos[sinTildes(x.nombre.trim())] = x.foto; });
       (f || []).forEach(x => { const e = peso.get(sinTildes(x.nombre.trim())); if (e) e.foto = x.foto; });
     }
     sugs = [...peso.values()].sort((a, b) => b.v - a.v);

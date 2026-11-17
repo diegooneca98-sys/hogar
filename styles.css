@@ -78,3 +78,10 @@ h3.cat:first-child { margin-top: 0; }
 .fecha-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .fecha-bar .sug-tit { margin: 0; }
 .fecha-bar input[type=date] { margin: 0 0 0 6px; padding: 2px 6px; font-size: 16px; border: 0; background: transparent; color: var(--texto); width: auto; }
+/* lista de la compra más compacta: caben más artículos en vertical */
+.compacta .fila{padding:5px 0;gap:8px;font-size:14px}
+.compacta .check{width:20px;height:20px;border-radius:6px}
+.compacta .borrar{padding:2px 6px;font-size:16px}
+.compacta .cat-btn{font-size:13px}
+.compacta h3.cat{margin:10px 0 0}
+.compacta h3.cat:first-child{margin-top:0}

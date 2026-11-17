@@ -153,7 +153,7 @@ async function verLista(tabla, titulo, placeholder) {
     <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
-    <div class="tarjeta" id="lista"></div>`;
+    <div class="tarjeta ${tabla === "compra" ? "compacta" : ""}" id="lista"></div>`;
   const pintar = async () => {
     const { data } = await sb.from(tabla).select("*").order("hecho").order("creado", { ascending: false });
     const hoy = hoyISO();

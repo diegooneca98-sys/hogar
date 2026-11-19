@@ -149,7 +149,8 @@ async function verLista(tabla, titulo, placeholder) {
       autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" enterkeyhint="done"
       data-1p-ignore data-lpignore="true" data-form-type="other"></textarea><button type="button" id="b-add">Añadir</button></div>
     ${tabla === "tareas" ? `<div class="fecha-bar"><label class="mini">📅 Para el día <input type="date" id="f-fecha" min="${hoyISO()}"></label>
-      <span class="sug-tit">opcional: no saldrá en la lista hasta ese día</span></div>` : ""}
+      <button type="button" class="mini" id="b-rep">🔁 <span id="rep-txt">No se repite</span></button>
+      <span class="sug-tit">opcional: no saldrá en la lista hasta ese día</span></div>${HTML_REP}` : ""}
     <div id="sugerencias" class="sug-lista"></div>
     ${tabla === "compra" ? `<div class="ticket-bar"><label class="mini">📷 Añadir ticket<input type="file" id="f-ticket" accept="image/*" hidden></label>
       <span id="ticket-msg" class="sug-tit"></span></div><div id="tickets"></div>` : ""}</div>
@@ -165,7 +166,8 @@ async function verLista(tabla, titulo, placeholder) {
     const fila = x => `
       <div class="fila ${x.hecho ? "tachado" : ""}" data-id="${x.id}">
         <button class="check ${x.hecho ? "hecho" : ""}" data-acc="toggle"></button>
-        <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}${x.fecha && !x.hecho ? ` <span class="etq">${fechaCorta(x.fecha)}</span>` : ""}</span>
+        <span class="txt">${esc(x.texto)}${x.coste ? ` <span class="etq">${eur(x.coste)}</span>` : ""}${x.fecha && !x.hecho ? ` <span class="etq">${fechaCorta(x.fecha)}</span>` : ""}${x.repetir && !x.hecho ? ` <span class="etq">🔁 ${esc(descRep(x.repetir))}</span>` : ""}</span>
+        ${tabla === "tareas" && !x.hecho ? `<button type="button" class="rep-btn ${x.repetir ? "activo" : ""}" data-acc="rep" title="Repetir" aria-label="Repetir">🔁</button>` : ""}
         ${tabla === "tareas" && !x.hecho ? `<label class="cat-btn" title="Cambiar fecha">📅<input type="date" class="cambiar-fecha" value="${x.fecha || ""}" aria-label="Cambiar fecha"></label>` : ""}
         ${tabla === "compra" ? `<label class="cat-btn" title="Cambiar categoría">🏷️<select class="cambiar-cat" data-acc="cat" aria-label="Cambiar categoría">${CATS_COMPRA.map(([id, n]) =>
           `<option value="${id}" ${id === catDe(x) ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}
@@ -181,8 +183,9 @@ async function verLista(tabla, titulo, placeholder) {
     if (hechos.length) html += `<h3 class="cat">${tabla === "compra" ? "Ya cogido" : "Hechas"}</h3>` + hechos.map(fila).join("");
     $("#lista").innerHTML = html;
     pendientes = pendTodas;
+    porId = new Map((data || []).map(x => [String(x.id), x]));
   };
-  let sugs = null, pendientes = [], aprendidas = {};
+  let sugs = null, pendientes = [], aprendidas = {}, porId = new Map(), repNuevo = null;
   const catDe = x => x.categoria || categoriaDe(x.texto, aprendidas);
   if (tabla === "compra") sb.from("compra_categorias").select("*").then(({ data }) => {
     (data || []).forEach(r => aprendidas[r.nombre] = r.categoria); pintar(); });
@@ -212,11 +215,16 @@ async function verLista(tabla, titulo, placeholder) {
     if (!pendientes.some(x => sinTildes(x.texto) === k)) {
       const { data: prev } = await sb.from(tabla).select("id,texto").eq("hecho", true).order("creado", { ascending: false }).limit(500);
       const viejo = (prev || []).find(x => sinTildes(x.texto) === k);
-      const fecha = tabla === "tareas" ? ($("#f-fecha").value || null) : undefined;
-      if (viejo) await sb.from(tabla).update({ hecho: false, hecho_en: null, coste: null, ...(tabla === "tareas" ? { fecha } : {}) }).eq("id", viejo.id);
-      else await sb.from(tabla).insert(tabla === "compra" ? { texto: t, categoria: categoriaDe(t, aprendidas) } : { texto: t, fecha });
+      let fecha = tabla === "tareas" ? ($("#f-fecha").value || null) : undefined, repetir = null;
+      if (tabla === "tareas" && repNuevo) {
+        fecha = primeraFecha(repNuevo, fecha || hoyISO());
+        repetir = { ...repNuevo, desde: fecha };
+      }
+      const extra = tabla === "tareas" ? { fecha, repetir } : {};
+      if (viejo) await sb.from(tabla).update({ hecho: false, hecho_en: null, coste: null, ...extra }).eq("id", viejo.id);
+      else await sb.from(tabla).insert(tabla === "compra" ? { texto: t, categoria: categoriaDe(t, aprendidas) } : { texto: t, ...extra });
     }
-    if (tabla === "tareas") $("#f-fecha").value = "";
+    if (tabla === "tareas") { $("#f-fecha").value = ""; repNuevo = null; $("#rep-txt").textContent = "No se repite"; }
     sugs = null; pintar(); $("#nuevo").focus();
   };
   $("#nuevo").oninput = async () => {
@@ -247,15 +255,27 @@ async function verLista(tabla, titulo, placeholder) {
   };
   $("#lista").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return;
-    const id = b.closest(".fila").dataset.id;
+    const id = b.closest(".fila").dataset.id, x = porId.get(id);
     if (b.dataset.acc === "borrar") await sb.from(tabla).delete().eq("id", id);
-    else {
-      const hecho = !b.classList.contains("hecho"); const cambio = { hecho, hecho_en: hecho ? new Date().toISOString() : null };
-      await sb.from(tabla).update(cambio).eq("id", id);
+    else if (b.dataset.acc === "rep") {
+      const r = await abrirRep(x?.repetir, x?.fecha); if (r === undefined) return;
+      if (!r) await sb.from("tareas").update({ repetir: null }).eq("id", id);
+      else { const fecha = primeraFecha(r, x?.fecha || hoyISO()); await sb.from("tareas").update({ repetir: { ...r, desde: fecha }, fecha }).eq("id", id); }
+    } else {
+      const hecho = !b.classList.contains("hecho");
+      if (hecho && x?.repetir) {
+        const sig = siguienteTrasHoy(x.repetir, x.fecha);
+        await sb.from(tabla).update({ fecha: sig, hecho_en: new Date().toISOString() }).eq("id", id);
+        aviso(`Hecha ✓ La próxima vez: ${fechaCorta(sig)}`);
+      } else await sb.from(tabla).update({ hecho, hecho_en: hecho ? new Date().toISOString() : null }).eq("id", id);
     }
     pintar();
   };
   if (tabla === "compra") { pintarTickets(); $("#f-ticket").onchange = subirTicket; }
+  if (tabla === "tareas") $("#b-rep").onclick = async () => {
+    const r = await abrirRep(repNuevo, $("#f-fecha").value || null); if (r === undefined) return;
+    repNuevo = r; $("#rep-txt").textContent = r ? descRep(r) : "No se repite";
+  };
   const ch = sb.channel("rt-" + tabla).on("postgres_changes", { event: "*", schema: "public", table: tabla }, pintar).subscribe();
   canales.push(ch); pintar();
 }
@@ -312,6 +332,96 @@ const fechaCorta = f => {
   if (f < hoy) return "atrasada · " + d.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
   return d.toLocaleDateString("es-ES", { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 };
+/* ---------- tareas que se repiten ----------
+   repetir = { u: "dia"|"semana"|"mes", n: cada cuántos, dias: [0-6] (0 = domingo, solo semana), dia: día del mes (solo mes), desde: fecha ancla } */
+const DIAS_SEM = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const ORDEN_SEM = [1, 2, 3, 4, 5, 6, 0];
+const aFecha = s => new Date(s + "T00:00:00Z");
+const aISO = d => d.toISOString().slice(0, 10);
+const sumarDias = (s, n) => { const d = aFecha(s); d.setUTCDate(d.getUTCDate() + n); return aISO(d); };
+const semanaN = s => Math.floor((aFecha(s).getTime() / 864e5 + 3) / 7); // semanas de lunes a domingo
+const diaMes = (y, m, dia) => aISO(new Date(Date.UTC(y, m, Math.min(dia, new Date(Date.UTC(y, m + 1, 0)).getUTCDate()))));
+function descRep(r) {
+  const n = r.n || 1;
+  if (r.u === "dia") return n === 1 ? "cada día" : `cada ${n} días`;
+  if (r.u === "mes") return n === 1 ? `el día ${r.dia} de cada mes` : `el día ${r.dia} cada ${n} meses`;
+  const ds = ORDEN_SEM.filter(d => (r.dias || []).includes(d)).map(d => DIAS_SEM[d]);
+  const lista = ds.length > 1 ? ds.slice(0, -1).join(", ") + " y " + ds.at(-1) : ds[0] || "";
+  if (n === 1) return ds.length === 7 ? "cada día" : `cada ${lista}`;
+  return `cada ${n} semanas: ${lista}`;
+}
+function primeraFecha(r, desde) { // primera fecha >= desde que encaja
+  if (r.u === "dia") return desde;
+  if (r.u === "mes") {
+    const d = aFecha(desde), f = diaMes(d.getUTCFullYear(), d.getUTCMonth(), r.dia);
+    return f >= desde ? f : diaMes(d.getUTCFullYear(), d.getUTCMonth() + 1, r.dia);
+  }
+  for (let i = 0, f = desde; i < 7; i++, f = sumarDias(f, 1)) if (r.dias.includes(aFecha(f).getUTCDay())) return f;
+  return desde;
+}
+function siguiente(r, f) { // siguiente fecha estrictamente después de f
+  const n = r.n || 1;
+  if (r.u === "dia") return sumarDias(f, n);
+  if (r.u === "mes") { const d = aFecha(f); return diaMes(d.getUTCFullYear(), d.getUTCMonth() + n, r.dia); }
+  const ancla = semanaN(r.desde || f);
+  for (let i = 1, g = sumarDias(f, 1); i <= 7 * n + 7; i++, g = sumarDias(g, 1))
+    if (r.dias.includes(aFecha(g).getUTCDay()) && (semanaN(g) - ancla) % n === 0) return g;
+  return sumarDias(f, 7 * n);
+}
+function siguienteTrasHoy(r, f) { // al completar: la próxima que toque después de hoy
+  const hoy = hoyISO(); let g = siguiente(r, f || hoy);
+  for (let i = 0; g <= hoy && i < 1000; i++) g = siguiente(r, g);
+  return g;
+}
+const HTML_REP = `<dialog id="dlg-rep" class="dlg"><h3>🔁 Repetir</h3>
+  <select id="r-u" aria-label="Cómo se repite"><option value="">No se repite</option><option value="dia">Cada X días</option>
+    <option value="semana">Ciertos días de la semana</option><option value="mes">Un día del mes</option></select>
+  <div id="r-cada" class="r-linea">Cada <input type="number" id="r-n" min="1" max="99" value="1" inputmode="numeric" autocomplete="off"> <span id="r-uni">días</span></div>
+  <div id="r-sem" class="r-dias">${ORDEN_SEM.map(d => `<button type="button" data-d="${d}">${"DLMXJVS"[d]}</button>`).join("")}</div>
+  <div id="r-mes" class="r-linea">El día <input type="number" id="r-dia" min="1" max="31" value="1" inputmode="numeric" autocomplete="off"> del mes</div>
+  <p id="r-desc" class="r-desc"></p>
+  <div class="grid2"><button type="button" class="secundario" id="r-cancel">Cancelar</button><button type="button" id="r-ok">Listo</button></div></dialog>`;
+function abrirRep(actual, fechaBase) { // devuelve la regla, null (no se repite) o undefined (cancelado)
+  const dlg = $("#dlg-rep"), base = aFecha(fechaBase || hoyISO());
+  let dias = actual?.dias?.slice() || [base.getUTCDay()];
+  $("#r-u").value = actual?.u || "semana";
+  $("#r-n").value = actual?.n || 1;
+  $("#r-dia").value = actual?.dia || base.getUTCDate();
+  const leer = () => {
+    const u = $("#r-u").value; if (!u) return null;
+    const n = Math.max(1, Math.min(99, parseInt($("#r-n").value) || 1));
+    if (u === "dia") return { u, n };
+    if (u === "mes") return { u, n, dia: Math.max(1, Math.min(31, parseInt($("#r-dia").value) || 1)) };
+    return { u, n, dias: dias.slice() };
+  };
+  const pintarR = () => {
+    const u = $("#r-u").value, n = parseInt($("#r-n").value) || 1;
+    $("#r-cada").classList.toggle("oculto", !u);
+    $("#r-sem").classList.toggle("oculto", u !== "semana");
+    $("#r-mes").classList.toggle("oculto", u !== "mes");
+    $("#r-uni").textContent = { dia: n === 1 ? "día" : "días", semana: n === 1 ? "semana" : "semanas", mes: n === 1 ? "mes" : "meses" }[u] || "";
+    document.querySelectorAll("#r-sem button").forEach(b => b.classList.toggle("activo", dias.includes(+b.dataset.d)));
+    const r = leer();
+    $("#r-ok").disabled = !!r && r.u === "semana" && !r.dias.length;
+    $("#r-desc").textContent = !r ? "Tarea normal, sin repetición." : r.u === "semana" && !r.dias.length ? "Elige al menos un día."
+      : `Se repetirá ${descRep(r)}. Primera vez: ${fechaCorta(primeraFecha(r, fechaBase || hoyISO()))}.`;
+  };
+  $("#r-u").onchange = $("#r-n").oninput = $("#r-dia").oninput = pintarR;
+  $("#r-sem").onclick = e => { const b = e.target.closest("button"); if (!b) return; const d = +b.dataset.d;
+    dias = dias.includes(d) ? dias.filter(x => x !== d) : [...dias, d]; pintarR(); };
+  pintarR();
+  return new Promise(res => {
+    let valor;
+    $("#r-ok").onclick = () => { valor = leer(); dlg.close(); };
+    $("#r-cancel").onclick = () => dlg.close();
+    dlg.onclose = () => res(valor);
+    dlg.showModal();
+  });
+}
+function aviso(t) {
+  let a = $("#aviso"); if (!a) { a = document.createElement("div"); a.id = "aviso"; document.body.appendChild(a); }
+  a.textContent = t; a.classList.add("ver"); clearTimeout(aviso.t); aviso.t = setTimeout(() => a.classList.remove("ver"), 2800);
+}
 const verCompra = () => verLista("compra", "Lista de la compra", "Leche, pan, huevos...");
 const verTareas = () => verLista("tareas", "Tareas de casa", "Limpiar baño, poner lavadora...");
 

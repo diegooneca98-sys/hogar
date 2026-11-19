@@ -85,3 +85,20 @@ h3.cat:first-child { margin-top: 0; }
 .compacta .cat-btn{font-size:13px}
 .compacta h3.cat{margin:10px 0 0}
 .compacta h3.cat:first-child{margin-top:0}
+/* tareas que se repiten */
+.rep-btn { background: none; padding: 4px; font-size: 15px; opacity: .35; flex: none; }
+.rep-btn.activo { opacity: .9; }
+.dlg { border: 1px solid var(--borde); border-radius: 16px; background: var(--tarjeta); color: var(--texto); padding: 18px; width: min(92vw, 380px); }
+.dlg::backdrop { background: rgba(0,0,0,.55); }
+.dlg h3 { margin: 0 0 12px; font-size: 17px; }
+.dlg select { font-size: 16px; }
+.r-linea { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--suave); }
+.r-linea input { width: 70px; margin: 0; font-size: 16px; text-align: center; }
+.r-dias { display: flex; gap: 6px; margin-bottom: 10px; }
+.r-dias button { flex: 1; padding: 10px 0; background: var(--fondo); color: var(--suave); border: 1px solid var(--borde); }
+.r-dias button.activo { background: var(--diego); color: #111; border-color: var(--diego); }
+.r-desc { font-size: 14px; color: var(--suave); min-height: 1.2em; margin: 4px 0 14px; }
+.dlg button:disabled { opacity: .4; }
+#aviso { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--texto); color: var(--fondo); padding: 10px 16px; border-radius: 99px; font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; z-index: 50; max-width: 90vw; text-align: center; }
+#aviso.ver { opacity: 1; transform: translate(-50%, 0); }
+button.mini { background: transparent; font-weight: 400; }

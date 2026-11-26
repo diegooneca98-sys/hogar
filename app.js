@@ -63,6 +63,7 @@ async function verInicio() {
         <div class="tiempo" id="tiempo"><span class="vacio">Cargando el tiempo...</span></div></div>
       <div class="tarjeta"><h2>Hoy</h2><div id="hoy"><span class="vacio">Cargando...</span></div></div>
       <div class="tarjeta"><h2>Próximos 7 días</h2><div id="semana"><span class="vacio">Cargando...</span></div></div>
+      <div class="tarjeta"><h2>Más adelante · 3 semanas</h2><div id="luego"><span class="vacio">Cargando...</span></div></div>
     </div>
     <div>
       <div class="tarjeta"><h2>Entrenos de Diego · 7 días</h2><div id="entreno"><span class="vacio">Cargando...</span></div></div>
@@ -89,21 +90,46 @@ async function cargarTiempo() {
 const COLOR_P = { diego: "var(--diego)", leire: "var(--leire)", comun: "var(--comun)" };
 const NOMBRE_P = { diego: "Diego", leire: "Leire", comun: "Los dos" };
 const horaDe = t => new Date(t).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
-const filaEvento = e => `<div class="fila"><span class="punto" style="background:${COLOR_P[e.persona]}"></span>
-  <span class="txt">${esc(NOMBRE_P[e.persona])}: ${esc(e.titulo)}</span><span class="etq">${horaDe(e.inicio)}</span></div>`;
+const diaDe = e => e.todo_dia && e.dia ? new Date(e.dia + "T12:00:00") : new Date(e.inicio);
+const filaEvento = (e, conDia) => {
+  const dia = conDia ? diaDe(e).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", ...(conDia === "mes" ? { month: "short" } : {}), timeZone: "Europe/Madrid" }) + " · " : "";
+  return `<div class="fila"><span class="punto" style="background:${COLOR_P[e.persona] || "var(--comun)"}"></span>
+  <span class="txt">${esc(NOMBRE_P[e.persona] || "")}: ${esc(e.titulo)}</span><span class="etq">${dia}${e.todo_dia ? "todo el día" : horaDe(e.inicio)}</span></div>`;
+};
+// Eventos de iCloud (función «calendario») para los próximos 29 días; se piden una vez por carga del inicio.
+let calCache = null;
+async function eventosCalendario(desde, hasta) {
+  if (!calCache || calCache.t < Date.now() - 5 * 60e3) {
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    const d29 = new Date(d0); d29.setDate(d29.getDate() + 29);
+    calCache = { t: Date.now(), p: sb.functions.invoke("calendario", { body: { desde: d0.toISOString(), hasta: d29.toISOString() } })
+      .then(({ data, error }) => error ? { eventos: [], fallos: [{ nombre: "calendarios", error: error.message }] } : data)
+      .catch(e => ({ eventos: [], fallos: [{ nombre: "calendarios", error: String(e) }] })) };
+  }
+  const r = await calCache.p;
+  // Un evento de varios días que ya empezó cuenta desde el primer día del rango.
+  return (r.eventos || []).filter(e => new Date(e.fin) > desde && new Date(e.inicio) < hasta)
+    .map(e => new Date(e.inicio) < desde ? { ...e, sigue: true } : e);
+}
 async function eventosEntre(desde, hasta) {
-  const { data } = await sb.from("eventos").select("*").gte("inicio", desde.toISOString()).lt("inicio", hasta.toISOString()).order("inicio");
-  return data || [];
+  const [{ data }, cal] = await Promise.all([
+    sb.from("eventos").select("*").gte("inicio", desde.toISOString()).lt("inicio", hasta.toISOString()).order("inicio"),
+    eventosCalendario(desde, hasta)]);
+  const orden = e => e.sigue ? desde.getTime() : (e.todo_dia && e.dia ? new Date(e.dia + "T00:00:00").getTime() : new Date(e.inicio).getTime());
+  return [...(data || []), ...cal].sort((a, b) => orden(a) - orden(b) || (b.todo_dia ? 1 : 0) - (a.todo_dia ? 1 : 0));
 }
 async function cargarHoy() {
   const d0 = new Date(); d0.setHours(0, 0, 0, 0);
   const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
   const d8 = new Date(d0); d8.setDate(d8.getDate() + 8);
-  const [evHoy, evSemana] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d1, d8)]);
-  $("#semana").innerHTML = evSemana.length ? evSemana.map(e => {
-    const dia = new Date(e.inicio).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", timeZone: "Europe/Madrid" });
-    return filaEvento(e).replace('<span class="etq">', `<span class="etq">${dia} · `);
-  }).join("") : `<span class="vacio">Nada apuntado en los próximos 7 días.</span>`;
+  const d29 = new Date(d0); d29.setDate(d29.getDate() + 29);
+  const [evHoy, evSemana, evLuego] = await Promise.all([eventosEntre(d0, d1), eventosEntre(d1, d8).then(l => l.filter(e => !e.sigue)), eventosEntre(d8, d29).then(l => l.filter(e => !e.sigue))]);
+  $("#semana").innerHTML = evSemana.length ? evSemana.map(e => filaEvento(e, true)).join("") : `<span class="vacio">Nada apuntado en los próximos 7 días.</span>`;
+  const { fallos = [] } = await calCache.p;
+  const aviso = fallos.length ? `<p class="vacio">⚠️ No se pudo leer: ${fallos.map(f => esc(f.nombre || "calendario")).join(", ")}</p>` : "";
+  const { count: nCal } = await sb.from("calendarios").select("*", { count: "exact", head: true }).eq("activo", true);
+  $("#luego").innerHTML = (evLuego.length ? evLuego.map(e => filaEvento(e, "mes")).join("")
+    : `<span class="vacio">${nCal ? "Nada apuntado más adelante." : "Aún no hay calendarios de iCloud vinculados. Añádelos en ⋯ Más › Calendarios."}</span>`) + aviso;
   const { data: turno } = await sb.rpc("turno_del_dia", { dia: hoyISO() });
   const { count: compra } = await sb.from("compra").select("*", { count: "exact", head: true }).eq("hecho", false);
   const hoy = hoyISO();
@@ -111,7 +137,7 @@ async function cargarHoy() {
   const { data: tHoy } = await sb.from("tareas").select("texto,fecha").eq("hecho", false).lte("fecha", hoy).order("fecha");
   $("#hoy").innerHTML = `
     <div class="fila"><span class="punto" style="background:var(--diego)"></span><span class="txt">Diego: turno</span><span class="etq">${esc(TURNOS[turno] || "—")}</span></div>
-    ${evHoy.map(filaEvento).join("")}
+    ${evHoy.map(e => filaEvento(e)).join("")}
     ${(tHoy || []).map(t => `<div class="fila"><span class="txt">📌 ${esc(t.texto)}</span><span class="etq">${t.fecha === hoy ? "hoy" : "atrasada"}</span></div>`).join("")}
     <div class="fila"><span class="txt">🛒 Por comprar</span><span class="etq">${compra ?? 0}</span></div>
     <div class="fila"><span class="txt">✅ Tareas pendientes</span><span class="etq">${tareas ?? 0}</span></div>`;
@@ -481,8 +507,41 @@ async function verMas() {
   $("#contenido").innerHTML = `
   <div class="tarjeta"><h2>Hola, ${esc(yo.nombre)}</h2><p class="vacio">${esc(yo.email)}</p>
     <button class="secundario" id="salir">Cerrar sesión</button></div>
+  <div class="tarjeta"><h2>Calendarios de iCloud</h2><div id="cals"></div>
+    <details class="ayuda"><summary>¿Cómo saco el enlace?</summary>
+      <p>En el iPhone: app <b>Calendario</b> › <b>Calendarios</b> (abajo) › toca la ⓘ del calendario › activa <b>Calendario público</b> › <b>Compartir enlace</b> › <b>Copiar</b>. Pégalo aquí. El enlace solo lo ve la app (no aparece en la web) y podéis quitarlo cuando queráis desactivando «Calendario público».</p>
+      <p>Hazlo con cada calendario que quieras ver: el tuyo y el compartido (azul).</p></details>
+    <div class="add-cal">
+      <select id="cal-persona"><option value="${esc(yo.clave)}">${esc(yo.nombre)}</option><option value="comun">Los dos (compartido)</option>${["diego", "leire"].filter(p => p !== yo.clave).map(p => `<option value="${p}">${NOMBRE_P[p]}</option>`).join("")}</select>
+      <input id="cal-nombre" placeholder="Nombre (p. ej. Personal)" autocomplete="off" data-1p-ignore data-lpignore="true">
+      <input id="cal-url" placeholder="Enlace webcal://... o https://..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true">
+      <button type="button" id="cal-add">Añadir calendario</button><p id="cal-msg" class="vacio"></p></div></div>
   <div class="tarjeta"><h2>Recibos</h2>${(data || []).map(r => `<div class="fila"><span class="txt">${esc(r.nombre)}<br><small class="vacio">día ${r.dia} · ${r.meses.length === 12 ? "cada mes" : r.meses.map(m => M[m]).join(", ")}${r.nota ? " · " + esc(r.nota) : ""}</small></span><span class="importe">${r.importe_aprox ? "~" + eur(r.importe_aprox) : ""}</span></div>`).join("")}</div>`;
   $("#salir").onclick = () => sb.auth.signOut();
+  pintarCalendarios();
+  $("#cal-add").onclick = async () => {
+    const url = $("#cal-url").value.trim(), msg = $("#cal-msg");
+    if (!/^(webcals?|https?):\/\/\S+$/i.test(url)) { msg.textContent = "Pega el enlace completo (empieza por webcal:// o https://)."; return; }
+    msg.textContent = "Guardando...";
+    const { error } = await sb.from("calendarios").insert({ persona: $("#cal-persona").value, nombre: $("#cal-nombre").value.trim() || "Calendario", url });
+    if (error) { msg.textContent = "No se pudo guardar: " + error.message; return; }
+    $("#cal-url").value = ""; $("#cal-nombre").value = ""; calCache = null;
+    msg.textContent = "Comprobando...";
+    const { data, error: e2 } = await sb.functions.invoke("calendario", { body: { desde: new Date().toISOString(), hasta: new Date(Date.now() + 28 * 864e5).toISOString() } });
+    msg.textContent = e2 ? "Guardado, pero no se pudo comprobar ahora." : (data.fallos || []).length
+      ? "⚠️ Guardado, pero hay un calendario que no se puede leer: revisa el enlace." : `✅ Leído: ${(data.eventos || []).length} eventos en las próximas 4 semanas.`;
+    pintarCalendarios();
+  };
+}
+async function pintarCalendarios() {
+  const { data } = await sb.from("calendarios").select("*").order("creado");
+  $("#cals").innerHTML = (data || []).length ? data.map(c => `<div class="fila"><span class="punto" style="background:${COLOR_P[c.persona]}"></span>
+    <span class="txt">${esc(NOMBRE_P[c.persona])}: ${esc(c.nombre)}</span><button class="borrar" data-cal="${c.id}" title="Quitar">×</button></div>`).join("")
+    : `<p class="vacio">Ninguno todavía.</p>`;
+  $("#cals").querySelectorAll("[data-cal]").forEach(b => b.onclick = async () => {
+    if (!confirm("¿Quitar este calendario de la app?")) return;
+    await sb.from("calendarios").delete().eq("id", b.dataset.cal); calCache = null; pintarCalendarios();
+  });
 }
 
 arrancar();

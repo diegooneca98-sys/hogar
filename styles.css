@@ -102,3 +102,5 @@ h3.cat:first-child { margin-top: 0; }
 #aviso { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--texto); color: var(--fondo); padding: 10px 16px; border-radius: 99px; font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; z-index: 50; max-width: 90vw; text-align: center; }
 #aviso.ver { opacity: 1; transform: translate(-50%, 0); }
 button.mini { background: transparent; font-weight: 400; }
+.ayuda{margin:8px 0 12px;font-size:14px;color:var(--suave,#9ca3af)}.ayuda summary{cursor:pointer}.ayuda p{margin:6px 0}
+.add-cal{margin-top:8px}.add-cal input,.add-cal select{font-size:16px}
